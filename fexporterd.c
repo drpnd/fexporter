@@ -21,12 +21,116 @@
  * SOFTWARE.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
+#include <pcap/pcap.h>
+
+#define FEXPORTER_SNAPLEN       96
+#define FEXPORTER_PROMISC       1
+#define FEXPORTER_TO_MS         1
+
+
+
+struct ipfix_template_v4 {
+    int cnt;
+};
+
+
+
+/* Prototype declarations */
+void usage(const char *);
+void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
+
+
+/*
+ * Print out usage
+ */
+void
+usage(const char *prog)
+{
+    fprintf(stderr, "%s: interface\n", prog);
+}
+
+/*
+ * Callback function called from pcap_loop
+ */
+void
+cb_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
+{
+    //struct timeval ts;
+    //ts = h->ts;
+    //h->caplen;
+    //h->len;
+
+    printf("%ld.%06u %d\n", h->ts.tv_sec, h->ts.tv_usec, h->len);
+    fflush(stdout);
+}
+
 /*
  * Main routine
  */
 int
 main(int argc, const char *const argv[])
 {
+    pcap_t *pd;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const char *ifname;
+    struct bpf_program bpfp;
+    /* Definition of the loopback function */
+    void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
+
+    if ( argc < 2 ) {
+        usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+    ifname = argv[1];
+
+    /* Open pcap */
+    pd = pcap_open_live(ifname, FEXPORTER_SNAPLEN, FEXPORTER_PROMISC,
+                        FEXPORTER_TO_MS, errbuf);
+    if ( NULL == pd ) {
+        /* error */
+        fprintf(stderr, "%s\n", errbuf);
+        return EXIT_FAILURE;
+    }
+
+    /* Check the linktype */
+    if ( DLT_EN10MB != pcap_datalink(pd) ) {
+        fprintf(stderr, "Unsupported link type: %d\n", pcap_datalink(pd));
+        pcap_close(pd);
+        return EXIT_FAILURE;
+    }
+
+    /* Compile the filter (not used) */
+    if ( pcap_compile(pd, &bpfp, "", 0, (bpf_u_int32)0) < 0 ) {
+        /* error */
+        pcap_perror(pd, "pcap_compile()");
+        pcap_close(pd);
+        return EXIT_FAILURE;
+    }
+
+    /* Set the compiled filter */
+    if ( pcap_setfilter(pd, &bpfp) < 0 ) {
+        /* error */
+        pcap_perror(pd, "pcap_setfilter()");
+        pcap_freecode(&bpfp);
+        pcap_close(pd);
+        return EXIT_FAILURE;
+    }
+
+    /* Entering the loop, reading packets */
+    if ( pcap_loop(pd, 0, cb_handler, (u_char *)NULL) < 0 ) {
+        (void)fprintf(stderr, "%s: pcap_loop: %s\n", argv[0], pcap_geterr(pd));
+        pcap_freecode(&bpfp);
+        pcap_close(pd);
+        return EXIT_FAILURE;
+    }
+
+    /* Close pcap */
+    pcap_freecode(&bpfp);
+    pcap_close(pd);
+
     return 0;
 }
 

@@ -31,6 +31,8 @@ set (fexporter_VERSION "current-${BUILD_DATETIME}")
 
 # fexporterd
 add_executable(fexporterd fexporterd.c)
+# link the libraries to the executable
+target_link_libraries (fexporterd pcap)
 
 # testing
 #include(CTest)
