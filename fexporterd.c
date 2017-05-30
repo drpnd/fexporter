@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <sys/time.h>
 #include <pcap/pcap.h>
 
@@ -31,11 +32,26 @@
 #define FEXPORTER_TO_MS         1
 
 
-
 struct ipfix_template_v4 {
     int cnt;
 };
 
+struct flow_stat {
+};
+struct flow_classifier_ipv4 {
+    uint32_t sip;
+    uint32_t dip;
+    uint8_t proto;
+    uint16_t sport;
+    uint16_t dport;
+};
+struct flow_classifier_ipv6 {
+    uint8_t sip[16];
+    uint8_t dip[16];
+    uint8_t proto;
+    uint16_t sport;
+    uint16_t dport;
+};
 
 
 /* Prototype declarations */
@@ -58,12 +74,19 @@ usage(const char *prog)
 void
 cb_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
-    //struct timeval ts;
+    struct timeval ts;
+    size_t len;
+    size_t caplen;
+
+    len = h->len;
+    caplen = h->caplen;
     //ts = h->ts;
     //h->caplen;
     //h->len;
 
-    printf("%ld.%06u %d\n", h->ts.tv_sec, h->ts.tv_usec, h->len);
+    ts = h->ts;
+
+    printf("%ld.%06u %zu %zu\n", ts.tv_sec, ts.tv_usec, len, caplen);
     fflush(stdout);
 }
 
