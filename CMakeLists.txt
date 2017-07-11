@@ -55,7 +55,7 @@ set (fexporter_VERSION "current-${BUILD_DATETIME}")
 #set (fexporter_VERSION_PATCH "0")
 
 # fexporterd
-add_executable(fexporterd fexporterd.c ipfix.h)
+add_executable(fexporterd fexporterd.c flowtable.c flowtable.h ipfix.h)
 # link the libraries to the executable
 target_link_libraries (fexporterd pcap)
 
