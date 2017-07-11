@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <sys/time.h>
 #include <pcap/pcap.h>
+#include "ipfix.h"
 
 #define FEXPORTER_SNAPLEN       96
 #define FEXPORTER_PROMISC       1
@@ -36,23 +37,48 @@ struct ipfix_template_v4 {
     int cnt;
 };
 
+/*
+ * Statistics
+ */
 struct flow_stat {
+    uint64_t octets;
+    uint64_t packets;
 };
+
+/*
+ * Classifier for IPv4
+ */
 struct flow_classifier_ipv4 {
     uint32_t sip;
     uint32_t dip;
     uint8_t proto;
     uint16_t sport;
-    uint16_t dport;
+    uint16_t dport;             /* ICMP code for ICMP */
+    uint8_t tos;
 };
+
+/*
+ * Classifier for IPv6
+ */
 struct flow_classifier_ipv6 {
     uint8_t sip[16];
     uint8_t dip[16];
     uint8_t proto;
     uint16_t sport;
-    uint16_t dport;
+    uint16_t dport;             /* ICMP code for ICMP */
 };
 
+/*
+ * Flow classifier
+ */
+struct flow_classifier {
+    int proto;
+    int ifindex;
+    union {
+        struct flow_classifier_ipv4 ipv4;
+        struct flow_classifier_ipv6 ipv6;
+    } ip;
+};
 
 /* Prototype declarations */
 void usage(const char *);
