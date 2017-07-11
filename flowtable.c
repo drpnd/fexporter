@@ -21,8 +21,8 @@
  * SOFTWARE.
  */
 
+#include "flowtable.h"
 #include <stdlib.h>
-
 
 flowtable_t *
 flowtable_init()

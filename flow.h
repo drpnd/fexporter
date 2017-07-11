@@ -21,16 +21,14 @@
  * SOFTWARE.
  */
 
-#ifndef _FLOWTABLE_H
-#define _FLOWTABLE_H
+#ifndef _FLOW_H
+#define _FLOW_H
 
-#include "flow.h"
-
-typedef struct flowtable {
+typedef struct flow {
     
-} flowtable_t;
+} flow_t;
 
-#endif /* _FLOWTABLE_H */
+#endif /* _FLOW_H */
 
 /*
  * Local variables:
