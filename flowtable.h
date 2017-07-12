@@ -25,10 +25,46 @@
 #define _FLOWTABLE_H
 
 #include "flow.h"
+#include <unistd.h>
 
-typedef struct flowtable {
-    
+/*
+ * Entry of flow table
+ */
+typedef struct {
+    /* Valid */
+    uint8_t valid;
+    /* Key */
+    flow_t flow;
+    /* Value */
+    flow_stats_t stat;
+} flowtable_entry_t;
+
+/*
+ * Flow table
+ */
+typedef struct {
+    /* Flow table size */
+    size_t size;
+    /* Entries; i.e., buckets of a hash table */
+    flowtable_entry_t *entries;
 } flowtable_t;
+
+/* Callback function for flowtable_scal() */
+typedef int (*flowtable_scan_f)(flowtable_t *, flowtable_entry_t *);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+    flowtable_t * flowtable_init(size_t);
+    void flowtable_release(flowtable_t *);
+    flow_stats_t * flowtable_search(flowtable_t *, flow_t *);
+    int flowtable_scan_cb(flowtable_t *, flowtable_scan_f);
+    int flowtable_reset(flowtable_t *);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FLOWTABLE_H */
 

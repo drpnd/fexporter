@@ -24,9 +24,71 @@
 #ifndef _FLOW_H
 #define _FLOW_H
 
-typedef struct flow {
-    
+#include <stdint.h>
+
+/*
+ * IPv4 address
+ */
+typedef union {
+    /* Byte */
+    uint8_t b[4];
+    /* Double-word */
+    uint32_t dw;
+} flow_ipv4_addr_t;
+
+/*
+ * IPv6 address
+ */
+typedef union {
+    /* Byte */
+    uint8_t b[16];
+    /* Quad-words */
+    uint64_t qw[2];
+} flow_ipv6_addr_t;
+
+/*
+ * IPv4 flow
+ */
+typedef struct {
+    flow_ipv4_addr_t sip;
+    flow_ipv4_addr_t dip;
+    uint8_t proto;
+    uint16_t sport;             /* ICMP type for ICMP */
+    uint16_t dport;             /* ICMP code for ICMP */
+    uint8_t tos;
+} flow_ipv4_t;
+
+/*
+ * IPv6 flow
+ */
+typedef struct {
+    flow_ipv6_addr_t sip;
+    flow_ipv6_addr_t dip;
+    uint8_t proto;
+    uint16_t sport;             /* ICMP type for ICMP */
+    uint16_t dport;             /* ICMP code for ICMP */
+    uint8_t tclass;             /* Traffic class */
+} flow_ipv6_t;
+
+typedef struct {
+    /* Interface index */
+    int ifindex;
+    /* EtherType */
+    uint16_t etype;
+    /* Classifier */
+    union {
+        flow_ipv4_t ipv4;
+        flow_ipv6_t ipv6;
+    } classifier;
 } flow_t;
+
+/* Statistical values */
+typedef struct {
+    uint64_t start_usec;
+    uint64_t end_usec;
+    uint64_t octets;
+    uint64_t packets;
+} flow_stats_t;
 
 #endif /* _FLOW_H */
 

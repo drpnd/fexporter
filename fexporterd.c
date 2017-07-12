@@ -24,9 +24,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/time.h>
 #include <pcap/pcap.h>
+#include <netinet/if_ether.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/icmp6.h>
 #include "ipfix.h"
+#include "flowtable.h"
+
+/* # of entries in the flow table */
+#define FEXPORTER_FLOWTABLE_SIZE 2048
+
+/* Default timeout in seconds */
+#define FEXPORTER_DEFAULT_TIMEOUT 600
 
 #define FEXPORTER_SNAPLEN       96
 #define FEXPORTER_PROMISC       1
@@ -80,10 +95,20 @@ struct flow_classifier {
     } ip;
 };
 
+struct fexporter {
+    /* Flow table */
+    flowtable_t *ft;
+    /* Timeout in seconds */
+    uint32_t timeout;
+    /* Last flushed */
+    uint64_t last_flushed;
+};
+
+
 /* Prototype declarations */
 void usage(const char *);
+uint64_t diff_timeval(struct timeval, struct timeval);
 void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
-
 
 /*
  * Print out usage
@@ -95,25 +120,269 @@ usage(const char *prog)
 }
 
 /*
+ * Get the difference between two timestamps in microsecond
+ */
+uint64_t
+diff_timeval(struct timeval ts1, struct timeval ts2)
+{
+    uint64_t r;
+
+    r = (ts2.tv_sec - ts1.tv_sec) * 1000000 + (ts2.tv_usec - ts1.tv_usec);
+
+    return r;
+}
+
+/*
+ * Analyze ICMP to get ICMP type and code
+ */
+int
+analyze_icmp(const uint8_t *pkt, size_t caplen, uint16_t *type, uint16_t *code)
+{
+    struct icmp *icmp;
+
+    icmp = (struct icmp *)pkt;
+    if ( caplen < sizeof(struct icmp) ) {
+        return -1;
+    }
+    *type = icmp->icmp_type;
+    *code = icmp->icmp_code;
+
+    return 0;
+}
+
+/*
+ * Analyze ICMPv6 to get ICMP type and code
+ */
+int
+analyze_icmpv6(const uint8_t *pkt, size_t caplen, uint16_t *type, uint16_t *code)
+{
+    struct icmp6_hdr *icmp;
+
+    icmp = (struct icmp6_hdr *)pkt;
+    if ( caplen < sizeof(struct icmp6_hdr) ) {
+        return -1;
+    }
+    *type = icmp->icmp6_type;
+    *code = icmp->icmp6_code;
+
+    return 0;
+}
+
+/*
+ * Analyze TCP to get source and destination ports
+ */
+int
+analyze_tcp(const uint8_t *pkt, size_t caplen, uint16_t *sport, uint16_t *dport)
+{
+    struct tcphdr *tcp;
+
+    tcp = (struct tcphdr *)pkt;
+    if ( caplen < sizeof(struct tcphdr) ) {
+        return -1;
+    }
+    *sport = tcp->th_sport;
+    *dport = tcp->th_dport;
+
+    return 0;
+}
+
+/*
+ * Analyze UDP to get source and destination ports
+ */
+int
+analyze_udp(const uint8_t *pkt, size_t caplen, uint16_t *sport, uint16_t *dport)
+{
+    struct udphdr *udp;
+
+    udp = (struct udphdr *)pkt;
+    if ( caplen < sizeof(struct udphdr) ) {
+        return -1;
+    }
+    *sport = udp->uh_sport;
+    *dport = udp->uh_dport;
+
+    return 0;
+}
+
+/*
+ * Analyze IPv4 packet
+ */
+int
+analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
+             size_t caplen, size_t len, size_t origlen)
+{
+    struct ip *ip;
+    size_t hl;
+    int proto;
+    uint16_t sport;
+    uint16_t dport;
+    int ret;
+    flow_t flow;
+
+    ip = (struct ip *)pkt;
+
+    /* Header length */
+    hl = 4 * ip->ip_hl;
+    if ( caplen < hl ) {
+        /* Invalid header length */
+        return -1;
+    }
+    /* Protocol */
+    proto = ip->ip_p;
+    sport = 0;
+    dport = 0;
+    switch ( proto ) {
+    case 1:
+        /* ICMP */
+        ret = analyze_icmp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    case 6:
+        /* TCP */
+        ret = analyze_tcp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    case 17:
+        /* UDP */
+        ret = analyze_udp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    default:
+        ret = 0;
+    }
+    if ( ret < 0 ) {
+        return -1;
+    }
+
+    memset(&flow, 0, sizeof(flow_t));
+    flow.ifindex = 0;
+    flow.etype = 0x0800;
+    flow.classifier.ipv4.sip.dw = ntohl(ip->ip_src.s_addr);
+    flow.classifier.ipv4.dip.dw = ntohl(ip->ip_dst.s_addr);
+    flow.classifier.ipv4.proto = proto;
+    flow.classifier.ipv4.sport = sport;
+    flow.classifier.ipv4.dport = dport;
+
+
+    flow_stats_t *stats;
+    stats = flowtable_search(fexprt->ft, &flow);
+
+    printf("%ld.%06u %zu %zu %p\n", ts.tv_sec, ts.tv_usec, len, caplen, stats);
+    fflush(stdout);
+
+
+    return 0;
+}
+
+/*
+ * Analyze IPv6 packet
+ */
+int
+analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
+             size_t caplen, size_t len, size_t origlen)
+{
+    struct ip6_hdr *ip;
+    int proto;
+    uint16_t sport;
+    uint16_t dport;
+    int ret;
+    size_t hl;
+    flow_t flow;
+
+    ip = (struct ip6_hdr *)pkt;
+    hl = sizeof(struct ip6_hdr);
+    if ( caplen < hl ) {
+        return -1;
+    }
+
+    /* Protocol */
+    proto = ip->ip6_nxt;
+    sport = 0;
+    dport = 0;
+    switch ( proto ) {
+    case 1:
+        /* ICMP */
+        ret = analyze_icmpv6(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    case 6:
+        /* TCP */
+        ret = analyze_tcp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    case 17:
+        /* UDP */
+        ret = analyze_udp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    default:
+        ret = 0;
+    }
+    if ( ret < 0 ) {
+        return -1;
+    }
+
+    memset(&flow, 0, sizeof(flow_t));
+    flow.ifindex = 0;
+    flow.etype = 0x86dd;
+    memcpy(flow.classifier.ipv6.sip.b, ip->ip6_src.s6_addr, 16);
+    memcpy(flow.classifier.ipv6.dip.b, ip->ip6_dst.s6_addr, 16);
+    flow.classifier.ipv6.proto = proto;
+    flow.classifier.ipv6.sport = sport;
+    flow.classifier.ipv6.dport = dport;
+
+    return 0;
+}
+
+/*
+ * Analyze packet
+ */
+int
+analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
+        size_t caplen, size_t len)
+{
+    struct ether_header *eth;
+
+    /* Ethernet header */
+    eth = (struct ether_header *)pkt;
+    if ( caplen < sizeof(struct ether_header) ) {
+        /* Captured length is not sufficient to get the Ethernet header. */
+        return -1;
+    }
+
+    switch ( ntohs(eth->ether_type) ) {
+    case 0x0800:
+        /* IPv4 */
+        return analyze_ipv4(fexprt, ts, pkt + sizeof(struct ether_header),
+                            caplen - sizeof(struct ether_header),
+                            len - sizeof(struct ether_header), len);
+    case 0x86dd:
+        /* IPv6 */
+        return analyze_ipv6(fexprt, ts, pkt + sizeof(struct ether_header),
+                            caplen - sizeof(struct ether_header),
+                            len - sizeof(struct ether_header), len);
+    default:
+        /* Others; ignore */
+        ;
+    }
+
+    return 0;
+}
+
+/*
  * Callback function called from pcap_loop
  */
 void
 cb_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 {
+    struct fexporter *fexprt;
     struct timeval ts;
     size_t len;
     size_t caplen;
 
-    len = h->len;
-    caplen = h->caplen;
-    //ts = h->ts;
-    //h->caplen;
-    //h->len;
+    /* Type conversion */
+    fexprt = (struct fexporter *)user;
 
     ts = h->ts;
+    len = h->len;
+    caplen = h->caplen;
 
-    printf("%ld.%06u %zu %zu\n", ts.tv_sec, ts.tv_usec, len, caplen);
-    fflush(stdout);
+    /* Analyze this packet */
+    (void)analyze(fexprt, ts, bytes, caplen, len);
 }
 
 /*
@@ -128,6 +397,7 @@ main(int argc, const char *const argv[])
     struct bpf_program bpfp;
     /* Definition of the loopback function */
     void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
+    struct fexporter fexprt;
 
     if ( argc < 2 ) {
         usage(argv[0]);
@@ -168,17 +438,27 @@ main(int argc, const char *const argv[])
         return EXIT_FAILURE;
     }
 
+    /* Allocate a flow table */
+    fexprt.ft = flowtable_init(FEXPORTER_FLOWTABLE_SIZE);
+    if ( NULL == fexprt.ft ) {
+        pcap_close(pd);
+        return EXIT_FAILURE;
+    }
+    fexprt.timeout = FEXPORTER_DEFAULT_TIMEOUT;
+
     /* Entering the loop, reading packets */
-    if ( pcap_loop(pd, 0, cb_handler, (u_char *)NULL) < 0 ) {
+    if ( pcap_loop(pd, 0, cb_handler, (u_char *)&fexprt) < 0 ) {
         (void)fprintf(stderr, "%s: pcap_loop: %s\n", argv[0], pcap_geterr(pd));
         pcap_freecode(&bpfp);
         pcap_close(pd);
+        flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
     }
 
     /* Close pcap */
     pcap_freecode(&bpfp);
     pcap_close(pd);
+    flowtable_release(fexprt.ft);
 
     return 0;
 }
