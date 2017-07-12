@@ -184,7 +184,7 @@ flow_template_set_v4(uint8_t *pkt)
 
     return length;
 }
-#if 0
+
 ssize_t
 flow_template_set_v6(uint8_t *pkt)
 {
@@ -194,82 +194,82 @@ flow_template_set_v6(uint8_t *pkt)
     int n;
 
     hdr = (struct ipfix_set_header *)pkt;
-    hdr->id = templateSet;
-    hdr->length = 0;
+    hdr->id = htons(templateSet);
 
     tmpl = (struct ipfix_template_header *)(hdr + 1);
-    tmpl->template_id = 260;
-    tmpl->field_count = 10;
+    tmpl->template_id = htons(260);
 
     field = (struct ipfix_template_field *)(tmpl + 1);
     n = 0;
 
     /* IPv6 source address */
-    field[n].type = sourceIPv6Address;
-    field[n].length = 16;
+    field[n].type = htons(sourceIPv6Address);
+    field[n].length = htons(16);
     n++;
 
     /* IPv6 destination address */
-    field[n].type = destinationIPv6Address;
-    field[n].length = 16;
+    field[n].type = htons(destinationIPv6Address);
+    field[n].length = htons(16);
     n++;
 
     /* IP protocol version */
-    field[n].type = ipVersion;
-    field[n].length = 1;
+    field[n].type = htons(ipVersion);
+    field[n].length = htons(1);
     n++;
 
     /* Protocol */
-    field[n].type = protocolIdentifier;
-    field[n].length = 1;
+    field[n].type = htons(protocolIdentifier);
+    field[n].length = htons(1);
     n++;
 
     /* Source port */
-    field[n].type = sourceTransportPort;
-    field[n].length = 2;
+    field[n].type = htons(sourceTransportPort);
+    field[n].length = htons(2);
     n++;
 
     /* Destination port */
-    field[n].type = destinationTransportPort;
-    field[n].length = 2;
+    field[n].type = htons(destinationTransportPort);
+    field[n].length = htons(2);
     n++;
 
     /* ICMPv6 type */
-    field[n].type = icmpTypeIPv6;
-    field[n].length = 1;
+    field[n].type = htons(icmpTypeIPv6);
+    field[n].length = htons(1);
     n++;
 
     /* ICMPv6 code */
-    field[n].type = icmpCodeIPv6;
-    field[n].length = 1;
+    field[n].type = htons(icmpCodeIPv6);
+    field[n].length = htons(1);
     n++;
 
     /* Bytes */
-    field[n].type = octetDeltaCount;
-    field[n].length = 8;
+    field[n].type = htons(octetDeltaCount);
+    field[n].length = htons(8);
     n++;
 
     /* Packets */
-    field[n].type = packetDeltaCount;
-    field[n].length = 8;
+    field[n].type = htons(packetDeltaCount);
+    field[n].length = htons(8);
     n++;
 
     /* Start */
-    field[n].type = flowStartMicroseconds;
-    field[n].length = 8;
+    field[n].type = htons(flowStartMicroseconds);
+    field[n].length = htons(8);
     n++;
 
     /* End */
-    field[n].type = flowEndMicroseconds;
-    field[n].length = 8;
+    field[n].type = htons(flowEndMicroseconds);
+    field[n].length = htons(8);
     n++;
 
-    tmpl->field_count = n;
-    hdr->length = (void *)&field[n] - (void *)hdr;
+    tmpl->field_count = htons(n);
+    uint16_t length;
+    length = (void *)&field[n] - (void *)hdr;
+    hdr->length = htons(length);
 
-    return hdr->length;
+    return length;
 }
-#endif
+
 
 /*
  * Analyze ICMP to get ICMP type and code
