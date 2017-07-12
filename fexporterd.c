@@ -34,6 +34,8 @@
 #include <netinet/udp.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/icmp6.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 #include "ipfix.h"
 #include "flowtable.h"
 #include "ifutil.h"
@@ -65,6 +67,10 @@ struct fexporter {
     uint64_t last_flushed;
     /* MAC address to determine the direction */
     uint8_t macaddr[6];
+
+    /* Socket */
+    int sock;
+    struct sockaddr_storage saddr;
 };
 
 
@@ -518,11 +524,43 @@ main(int argc, const char *const argv[])
     }
     fexprt.timeout = FEXPORTER_DEFAULT_TIMEOUT;
 
+    /* Get local MAC address */
     if ( ifutil_macaddr(ifname, fexprt.macaddr) < 0 ) {
         pcap_close(pd);
         flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
     }
+
+    /* Open UDP socket */
+    int sock;
+    struct sockaddr_storage saddr;
+    struct sockaddr_in *sin;
+    int ret;
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if ( sock < 0 ) {
+        fprintf(stderr, "Cannot open a UDP socket.");
+        pcap_freecode(&bpfp);
+        pcap_close(pd);
+        flowtable_release(fexprt.ft);
+        return EXIT_FAILURE;
+    }
+    memset(&saddr, 0, sizeof(struct sockaddr_storage));
+    sin = (struct sockaddr_in *)&saddr;
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(12345);
+    ret = inet_aton("127.0.0.1", &sin->sin_addr);
+    if ( ret < 0 ) {
+        close(sock);
+        pcap_freecode(&bpfp);
+        pcap_close(pd);
+        flowtable_release(fexprt.ft);
+        return EXIT_FAILURE;
+    }
+#if 0
+    const char msg[] = "test";
+    ret = sendto(sock, msg, strlen(msg), 0,
+                 (struct sockaddr *)sin, sizeof(struct sockaddr_in));
+#endif
 
     /* Entering the loop, reading packets */
     if ( pcap_loop(pd, 0, cb_handler, (u_char *)&fexprt) < 0 ) {
@@ -530,6 +568,7 @@ main(int argc, const char *const argv[])
         pcap_freecode(&bpfp);
         pcap_close(pd);
         flowtable_release(fexprt.ft);
+        close(sock);
         return EXIT_FAILURE;
     }
 
