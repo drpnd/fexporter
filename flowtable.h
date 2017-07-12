@@ -50,7 +50,7 @@ typedef struct {
 } flowtable_t;
 
 /* Callback function for flowtable_scal() */
-typedef int (*flowtable_scan_f)(flowtable_t *, flowtable_entry_t *);
+typedef int (*flowtable_scan_f)(flowtable_t *, flowtable_entry_t *, void *);
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,7 +60,7 @@ extern "C" {
     void flowtable_release(flowtable_t *);
     flow_stats_t * flowtable_search(flowtable_t *, flow_t *);
     size_t flowtable_count(flowtable_t *);
-    int flowtable_scan_cb(flowtable_t *, flowtable_scan_f);
+    int flowtable_scan_cb(flowtable_t *, flowtable_scan_f, void *);
     int flowtable_reset(flowtable_t *);
 
 #ifdef __cplusplus

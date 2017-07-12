@@ -51,10 +51,6 @@
 #define FEXPORTER_TO_MS         1
 
 
-struct ipfix_template_v4 {
-    int cnt;
-};
-
 /*
  * Floe exporter data structure
  */
@@ -78,7 +74,7 @@ struct fexporter {
 void usage(const char *);
 uint64_t diff_timeval(struct timeval, struct timeval);
 void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
-int flush(flowtable_t *);
+int flush(struct fexporter *);
 
 /*
  * Print out usage
@@ -101,6 +97,179 @@ diff_timeval(struct timeval ts1, struct timeval ts2)
 
     return r;
 }
+
+/*
+ * Organize flow template set
+ */
+ssize_t
+flow_template_set_v4(uint8_t *pkt)
+{
+    struct ipfix_set_header *hdr;
+    struct ipfix_template_header *tmpl;
+    struct ipfix_template_field *field;
+    int n;
+
+    hdr = (struct ipfix_set_header *)pkt;
+    hdr->id = htons(templateSet);
+
+    tmpl = (struct ipfix_template_header *)(hdr + 1);
+    tmpl->template_id = htons(259);
+
+    field = (struct ipfix_template_field *)(tmpl + 1);
+    n = 0;
+
+    /* IPv4 source address */
+    field[n].type = htons(sourceIPv4Address);
+    field[n].length = htons(4);
+    n++;
+
+    /* IPv4 destination address */
+    field[n].type = htons(destinationIPv4Address);
+    field[n].length = htons(4);
+    n++;
+
+    /* IP protocol version */
+    field[n].type = htons(ipVersion);
+    field[n].length = htons(1);
+    n++;
+
+    /* Protocol */
+    field[n].type = htons(protocolIdentifier);
+    field[n].length = htons(1);
+    n++;
+
+    /* Source port */
+    field[n].type = htons(sourceTransportPort);
+    field[n].length = htons(2);
+    n++;
+
+    /* Destination port */
+    field[n].type = htons(destinationTransportPort);
+    field[n].length = htons(2);
+    n++;
+
+    /* ICMP type */
+    field[n].type = htons(icmpTypeIPv4);
+    field[n].length = htons(1);
+    n++;
+
+    /* ICMP code */
+    field[n].type = htons(icmpCodeIPv4);
+    field[n].length = htons(1);
+    n++;
+
+    /* Bytes */
+    field[n].type = htons(octetDeltaCount);
+    field[n].length = htons(8);
+    n++;
+
+    /* Packets */
+    field[n].type = htons(packetDeltaCount);
+    field[n].length = htons(8);
+    n++;
+
+    /* Start */
+    field[n].type = htons(flowStartMicroseconds);
+    field[n].length = htons(8);
+    n++;
+
+    /* End */
+    field[n].type = htons(flowEndMicroseconds);
+    field[n].length = htons(8);
+    n++;
+
+    tmpl->field_count = htons(n);
+    uint16_t length = (void *)&field[n] - (void *)hdr;
+    hdr->length = htons(length);
+
+    return length;
+}
+#if 0
+ssize_t
+flow_template_set_v6(uint8_t *pkt)
+{
+    struct ipfix_set_header *hdr;
+    struct ipfix_template_header *tmpl;
+    struct ipfix_template_field *field;
+    int n;
+
+    hdr = (struct ipfix_set_header *)pkt;
+    hdr->id = templateSet;
+    hdr->length = 0;
+
+    tmpl = (struct ipfix_template_header *)(hdr + 1);
+    tmpl->template_id = 260;
+    tmpl->field_count = 10;
+
+    field = (struct ipfix_template_field *)(tmpl + 1);
+    n = 0;
+
+    /* IPv6 source address */
+    field[n].type = sourceIPv6Address;
+    field[n].length = 16;
+    n++;
+
+    /* IPv6 destination address */
+    field[n].type = destinationIPv6Address;
+    field[n].length = 16;
+    n++;
+
+    /* IP protocol version */
+    field[n].type = ipVersion;
+    field[n].length = 1;
+    n++;
+
+    /* Protocol */
+    field[n].type = protocolIdentifier;
+    field[n].length = 1;
+    n++;
+
+    /* Source port */
+    field[n].type = sourceTransportPort;
+    field[n].length = 2;
+    n++;
+
+    /* Destination port */
+    field[n].type = destinationTransportPort;
+    field[n].length = 2;
+    n++;
+
+    /* ICMPv6 type */
+    field[n].type = icmpTypeIPv6;
+    field[n].length = 1;
+    n++;
+
+    /* ICMPv6 code */
+    field[n].type = icmpCodeIPv6;
+    field[n].length = 1;
+    n++;
+
+    /* Bytes */
+    field[n].type = octetDeltaCount;
+    field[n].length = 8;
+    n++;
+
+    /* Packets */
+    field[n].type = packetDeltaCount;
+    field[n].length = 8;
+    n++;
+
+    /* Start */
+    field[n].type = flowStartMicroseconds;
+    field[n].length = 8;
+    n++;
+
+    /* End */
+    field[n].type = flowEndMicroseconds;
+    field[n].length = 8;
+    n++;
+
+    tmpl->field_count = n;
+    hdr->length = (void *)&field[n] - (void *)hdr;
+
+    return hdr->length;
+}
+#endif
 
 /*
  * Analyze ICMP to get ICMP type and code
@@ -150,8 +319,8 @@ analyze_tcp(const uint8_t *pkt, size_t caplen, uint16_t *sport, uint16_t *dport)
     if ( caplen < sizeof(struct tcphdr) ) {
         return -1;
     }
-    *sport = tcp->th_sport;
-    *dport = tcp->th_dport;
+    *sport = ntohs(tcp->th_sport);
+    *dport = ntohs(tcp->th_dport);
 
     return 0;
 }
@@ -168,8 +337,8 @@ analyze_udp(const uint8_t *pkt, size_t caplen, uint16_t *sport, uint16_t *dport)
     if ( caplen < sizeof(struct udphdr) ) {
         return -1;
     }
-    *sport = udp->uh_sport;
-    *dport = udp->uh_dport;
+    *sport = ntohs(udp->uh_sport);
+    *dport = ntohs(udp->uh_dport);
 
     return 0;
 }
@@ -235,7 +404,7 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     /* Update statistics */
     stats = flowtable_search(fexprt->ft, &flow);
     if ( NULL == stats  ) {
-        flush(fexprt->ft);
+        flush(fexprt);
         stats = flowtable_search(fexprt->ft, &flow);
         if ( NULL == stats  ) {
             return -1;
@@ -310,7 +479,7 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     /* Update statistics */
     stats = flowtable_search(fexprt->ft, &flow);
     if ( NULL == stats  ) {
-        flush(fexprt->ft);
+        flush(fexprt);
         stats = flowtable_search(fexprt->ft, &flow);
         if ( NULL == stats  ) {
             return -1;
@@ -326,9 +495,16 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     return 0;
 }
 
+/*
+ * Callback function to export a flow
+ */
 int
-flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e)
+flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e, void *user)
 {
+    struct fexporter *fexprt;
+
+    fexprt = (struct fexporter *)user;
+
     switch ( e->flow.etype ) {
     case 0x0800:
         /* IPv4 */
@@ -376,10 +552,10 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e)
 }
 
 int
-flush(flowtable_t *ft)
+flush(struct fexporter *fexprt)
 {
-    flowtable_scan_cb(ft, flush_flow_cb);
-    flowtable_reset(ft);
+    flowtable_scan_cb(fexprt->ft, flush_flow_cb, fexprt);
+    flowtable_reset(fexprt->ft);
 
     return 0;
 }
@@ -400,8 +576,27 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     curus = ts.tv_sec * 1000000 + ts.tv_usec;
     if ( fexprt->last_flushed + (uint64_t)fexprt->timeout * 1000000
          < curus ) {
+
+        uint8_t pkt[1500];
+        struct ipfix_header *ipfix;
+        ipfix = (struct ipfix_header *)pkt;
+        ipfix->version = htons(10);
+        ipfix->timestamp = htonl(ts.tv_sec);
+        ipfix->flowseq = htonl(1);
+        ipfix->obs_dom_id = htonl(256); //512 for IPv6
+        int l = flow_template_set_v4((uint8_t *)(ipfix + 1));
+        int ll = l + sizeof(struct ipfix_header);
+        ipfix->length = htons(ll);
+
+        if ( fexprt->saddr.ss_family == AF_INET ) {
+            ret = sendto(fexprt->sock, pkt, ll, 0,
+                         (struct sockaddr *)&fexprt->saddr,
+                         sizeof(struct sockaddr_in));
+            printf("%d\n", ret);
+        }
+
         /* Flush */
-        flush(fexprt->ft);
+        flush(fexprt);
         fexprt->last_flushed = curus;
     }
 
@@ -532,35 +727,28 @@ main(int argc, const char *const argv[])
     }
 
     /* Open UDP socket */
-    int sock;
-    struct sockaddr_storage saddr;
     struct sockaddr_in *sin;
     int ret;
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if ( sock < 0 ) {
+    fexprt.sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if ( fexprt.sock < 0 ) {
         fprintf(stderr, "Cannot open a UDP socket.");
         pcap_freecode(&bpfp);
         pcap_close(pd);
         flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
     }
-    memset(&saddr, 0, sizeof(struct sockaddr_storage));
-    sin = (struct sockaddr_in *)&saddr;
+    memset(&fexprt.saddr, 0, sizeof(struct sockaddr_storage));
+    sin = (struct sockaddr_in *)&fexprt.saddr;
     sin->sin_family = AF_INET;
-    sin->sin_port = htons(12345);
+    sin->sin_port = htons(4739);
     ret = inet_aton("127.0.0.1", &sin->sin_addr);
     if ( ret < 0 ) {
-        close(sock);
+        close(fexprt.sock);
         pcap_freecode(&bpfp);
         pcap_close(pd);
         flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
     }
-#if 0
-    const char msg[] = "test";
-    ret = sendto(sock, msg, strlen(msg), 0,
-                 (struct sockaddr *)sin, sizeof(struct sockaddr_in));
-#endif
 
     /* Entering the loop, reading packets */
     if ( pcap_loop(pd, 0, cb_handler, (u_char *)&fexprt) < 0 ) {
@@ -568,7 +756,7 @@ main(int argc, const char *const argv[])
         pcap_freecode(&bpfp);
         pcap_close(pd);
         flowtable_release(fexprt.ft);
-        close(sock);
+        close(fexprt.sock);
         return EXIT_FAILURE;
     }
 

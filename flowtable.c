@@ -120,13 +120,13 @@ flowtable_search(flowtable_t *ft, flow_t *f)
  * Scan all valid entries with a callback function
  */
 int
-flowtable_scan_cb(flowtable_t *ft, flowtable_scan_f cb)
+flowtable_scan_cb(flowtable_t *ft, flowtable_scan_f cb, void *user)
 {
     ssize_t i;
 
     for ( i = 0; i < (ssize_t)ft->size; i++ ) {
         if ( ft->entries[i].valid ) {
-            cb(ft, &ft->entries[i]);
+            cb(ft, &ft->entries[i], user);
         }
     }
 
