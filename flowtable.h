@@ -59,6 +59,7 @@ extern "C" {
     flowtable_t * flowtable_init(size_t);
     void flowtable_release(flowtable_t *);
     flow_stats_t * flowtable_search(flowtable_t *, flow_t *);
+    size_t flowtable_count(flowtable_t *);
     int flowtable_scan_cb(flowtable_t *, flowtable_scan_f);
     int flowtable_reset(flowtable_t *);
 

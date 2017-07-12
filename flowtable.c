@@ -102,7 +102,7 @@ flowtable_search(flowtable_t *ft, flow_t *f)
         } else {
             /* Not found, then create new entry */
             ft->entries[hash].valid = 1;
-            (void)memcpy(&ft->entries[hash],f, sizeof(flow_t));
+            (void)memcpy(&ft->entries[hash].flow, f, sizeof(flow_t));
             (void)memset(&ft->entries[hash].stat, 0, sizeof(flow_stats_t));
             return &ft->entries[hash].stat;
         }
@@ -128,6 +128,25 @@ flowtable_scan_cb(flowtable_t *ft, flowtable_scan_f cb)
     }
 
     return 0;
+}
+
+/*
+ * Count the number of entries in the flow table
+ */
+size_t
+flowtable_count(flowtable_t *ft)
+{
+    ssize_t i;
+    size_t cnt;
+
+    cnt = 0;
+    for ( i = 0; i < (ssize_t)ft->size; i++ ) {
+        if ( ft->entries[i].valid ) {
+            cnt++;
+        }
+    }
+
+    return cnt;
 }
 
 /*
