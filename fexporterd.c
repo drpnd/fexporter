@@ -36,6 +36,7 @@
 #include <netinet/icmp6.h>
 #include "ipfix.h"
 #include "flowtable.h"
+#include "ifutil.h"
 
 /* # of entries in the flow table */
 #define FEXPORTER_FLOWTABLE_SIZE 2048
@@ -62,6 +63,8 @@ struct fexporter {
     uint32_t timeout;
     /* Last flushed */
     uint64_t last_flushed;
+    /* MAC address to determine the direction */
+    uint8_t macaddr[6];
 };
 
 
@@ -170,7 +173,7 @@ analyze_udp(const uint8_t *pkt, size_t caplen, uint16_t *sport, uint16_t *dport)
  */
 int
 analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
-             size_t caplen, size_t len, size_t origlen)
+             size_t caplen, size_t len, size_t origlen, int dir)
 {
     struct ip *ip;
     size_t hl;
@@ -215,6 +218,7 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
 
     memset(&flow, 0, sizeof(flow_t));
     flow.ifindex = 0;
+    flow.direction = dir;
     flow.etype = 0x0800;
     flow.classifier.ipv4.sip.dw = ip->ip_src.s_addr;
     flow.classifier.ipv4.dip.dw = ip->ip_dst.s_addr;
@@ -246,7 +250,7 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
  */
 int
 analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
-             size_t caplen, size_t len, size_t origlen)
+             size_t caplen, size_t len, size_t origlen, int dir)
 {
     struct ip6_hdr *ip;
     int proto;
@@ -289,6 +293,7 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
 
     memset(&flow, 0, sizeof(flow_t));
     flow.ifindex = 0;
+    flow.direction = dir;
     flow.etype = 0x86dd;
     memcpy(flow.classifier.ipv6.sip.b, ip->ip6_src.s6_addr, 16);
     memcpy(flow.classifier.ipv6.dip.b, ip->ip6_dst.s6_addr, 16);
@@ -321,7 +326,8 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e)
     switch ( e->flow.etype ) {
     case 0x0800:
         /* IPv4 */
-        printf("%d.%d.%d.%d:%d->%d.%d.%d.%d:%d\n",
+        printf("%s %d.%d.%d.%d:%d->%d.%d.%d.%d:%d\n",
+               e->flow.direction ? "o" : "i",
                e->flow.classifier.ipv4.sip.b[0],
                e->flow.classifier.ipv4.sip.b[1],
                e->flow.classifier.ipv4.sip.b[2],
@@ -335,8 +341,9 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e)
         break;
     case 0x86dd:
         /* IPv6 */
-        printf("%02x%02x:%02x%02x:%02x%02x:%02x%02x"
+        printf("%s %02x%02x:%02x%02x:%02x%02x:%02x%02x"
                ":%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
+               e->flow.direction ? "o" : "i",
                e->flow.classifier.ipv6.sip.b[0],
                e->flow.classifier.ipv6.sip.b[1],
                e->flow.classifier.ipv6.sip.b[2],
@@ -381,6 +388,7 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     struct ether_header *eth;
     int ret;
     uint64_t curus;
+    int dir;
 
     /* Flush if reaching timeout */
     curus = ts.tv_sec * 1000000 + ts.tv_usec;
@@ -397,19 +405,27 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
         /* Captured length is not sufficient to get the Ethernet header. */
         return -1;
     }
+    /* Determine the direction from the MAC address */
+    if ( 0 == memcmp(eth->ether_shost, fexprt->macaddr, 6) ) {
+        /* Egress */
+        dir = 1;
+    } else {
+        /* Ingress */
+        dir = 0;
+    }
 
     switch ( ntohs(eth->ether_type) ) {
     case 0x0800:
         /* IPv4 */
         ret = analyze_ipv4(fexprt, ts, pkt + sizeof(struct ether_header),
                            caplen - sizeof(struct ether_header),
-                           len - sizeof(struct ether_header), len);
+                           len - sizeof(struct ether_header), len, dir);
         break;
     case 0x86dd:
         /* IPv6 */
         ret = analyze_ipv6(fexprt, ts, pkt + sizeof(struct ether_header),
                            caplen - sizeof(struct ether_header),
-                           len - sizeof(struct ether_header), len);
+                           len - sizeof(struct ether_header), len, dir);
         break;
     default:
         /* Others; ignore */
@@ -501,6 +517,12 @@ main(int argc, const char *const argv[])
         return EXIT_FAILURE;
     }
     fexprt.timeout = FEXPORTER_DEFAULT_TIMEOUT;
+
+    if ( ifutil_macaddr(ifname, fexprt.macaddr) < 0 ) {
+        pcap_close(pd);
+        flowtable_release(fexprt.ft);
+        return EXIT_FAILURE;
+    }
 
     /* Entering the loop, reading packets */
     if ( pcap_loop(pd, 0, cb_handler, (u_char *)&fexprt) < 0 ) {
