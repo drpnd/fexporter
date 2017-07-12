@@ -41,7 +41,7 @@
 #define FEXPORTER_FLOWTABLE_SIZE 2048
 
 /* Default timeout in seconds */
-#define FEXPORTER_DEFAULT_TIMEOUT 600
+#define FEXPORTER_DEFAULT_TIMEOUT 60
 
 #define FEXPORTER_SNAPLEN       96
 #define FEXPORTER_PROMISC       1
@@ -53,48 +53,8 @@ struct ipfix_template_v4 {
 };
 
 /*
- * Statistics
+ * Floe exporter data structure
  */
-struct flow_stat {
-    uint64_t octets;
-    uint64_t packets;
-};
-
-/*
- * Classifier for IPv4
- */
-struct flow_classifier_ipv4 {
-    uint32_t sip;
-    uint32_t dip;
-    uint8_t proto;
-    uint16_t sport;
-    uint16_t dport;             /* ICMP code for ICMP */
-    uint8_t tos;
-};
-
-/*
- * Classifier for IPv6
- */
-struct flow_classifier_ipv6 {
-    uint8_t sip[16];
-    uint8_t dip[16];
-    uint8_t proto;
-    uint16_t sport;
-    uint16_t dport;             /* ICMP code for ICMP */
-};
-
-/*
- * Flow classifier
- */
-struct flow_classifier {
-    int proto;
-    int ifindex;
-    union {
-        struct flow_classifier_ipv4 ipv4;
-        struct flow_classifier_ipv6 ipv6;
-    } ip;
-};
-
 struct fexporter {
     /* Flow table */
     flowtable_t *ft;
@@ -109,6 +69,7 @@ struct fexporter {
 void usage(const char *);
 uint64_t diff_timeval(struct timeval, struct timeval);
 void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
+int flush(flowtable_t *);
 
 /*
  * Print out usage
@@ -218,6 +179,7 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     uint16_t dport;
     int ret;
     flow_t flow;
+    flow_stats_t *stats;
 
     ip = (struct ip *)pkt;
 
@@ -254,19 +216,27 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     memset(&flow, 0, sizeof(flow_t));
     flow.ifindex = 0;
     flow.etype = 0x0800;
-    flow.classifier.ipv4.sip.dw = ntohl(ip->ip_src.s_addr);
-    flow.classifier.ipv4.dip.dw = ntohl(ip->ip_dst.s_addr);
+    flow.classifier.ipv4.sip.dw = ip->ip_src.s_addr;
+    flow.classifier.ipv4.dip.dw = ip->ip_dst.s_addr;
     flow.classifier.ipv4.proto = proto;
     flow.classifier.ipv4.sport = sport;
     flow.classifier.ipv4.dport = dport;
 
-
-    flow_stats_t *stats;
+    /* Update statistics */
     stats = flowtable_search(fexprt->ft, &flow);
-
-    printf("%ld.%06u %zu %zu %p\n", ts.tv_sec, ts.tv_usec, len, caplen, stats);
-    fflush(stdout);
-
+    if ( NULL == stats  ) {
+        flush(fexprt->ft);
+        stats = flowtable_search(fexprt->ft, &flow);
+        if ( NULL == stats  ) {
+            return -1;
+        }
+    }
+    if ( !stats->start_usec ) {
+        stats->start_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    }
+    stats->end_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    stats->packets += 1;
+    stats->octets += ntohs(ip->ip_len);
 
     return 0;
 }
@@ -285,6 +255,7 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     int ret;
     size_t hl;
     flow_t flow;
+    flow_stats_t *stats;
 
     ip = (struct ip6_hdr *)pkt;
     hl = sizeof(struct ip6_hdr);
@@ -297,10 +268,6 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     sport = 0;
     dport = 0;
     switch ( proto ) {
-    case 1:
-        /* ICMP */
-        ret = analyze_icmpv6(pkt + hl, caplen - hl, &sport, &dport);
-        break;
     case 6:
         /* TCP */
         ret = analyze_tcp(pkt + hl, caplen - hl, &sport, &dport);
@@ -308,6 +275,10 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     case 17:
         /* UDP */
         ret = analyze_udp(pkt + hl, caplen - hl, &sport, &dport);
+        break;
+    case 58:
+        /* ICMPv6 */
+        ret = analyze_icmpv6(pkt + hl, caplen - hl, &sport, &dport);
         break;
     default:
         ret = 0;
@@ -325,6 +296,78 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     flow.classifier.ipv6.sport = sport;
     flow.classifier.ipv6.dport = dport;
 
+    /* Update statistics */
+    stats = flowtable_search(fexprt->ft, &flow);
+    if ( NULL == stats  ) {
+        flush(fexprt->ft);
+        stats = flowtable_search(fexprt->ft, &flow);
+        if ( NULL == stats  ) {
+            return -1;
+        }
+    }
+    if ( !stats->start_usec ) {
+        stats->start_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    }
+    stats->end_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    stats->packets += 1;
+    stats->octets += ntohs(ip->ip6_plen) + 40;
+
+    return 0;
+}
+
+int
+flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e)
+{
+    switch ( e->flow.etype ) {
+    case 0x0800:
+        /* IPv4 */
+        printf("%d.%d.%d.%d:%d->%d.%d.%d.%d:%d\n",
+               e->flow.classifier.ipv4.sip.b[0],
+               e->flow.classifier.ipv4.sip.b[1],
+               e->flow.classifier.ipv4.sip.b[2],
+               e->flow.classifier.ipv4.sip.b[3],
+               e->flow.classifier.ipv4.sport,
+               e->flow.classifier.ipv4.dip.b[0],
+               e->flow.classifier.ipv4.dip.b[1],
+               e->flow.classifier.ipv4.dip.b[2],
+               e->flow.classifier.ipv4.dip.b[3],
+               e->flow.classifier.ipv4.dport);
+        break;
+    case 0x86dd:
+        /* IPv6 */
+        printf("%02x%02x:%02x%02x:%02x%02x:%02x%02x"
+               ":%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
+               e->flow.classifier.ipv6.sip.b[0],
+               e->flow.classifier.ipv6.sip.b[1],
+               e->flow.classifier.ipv6.sip.b[2],
+               e->flow.classifier.ipv6.sip.b[3],
+               e->flow.classifier.ipv6.sip.b[4],
+               e->flow.classifier.ipv6.sip.b[5],
+               e->flow.classifier.ipv6.sip.b[6],
+               e->flow.classifier.ipv6.sip.b[7],
+               e->flow.classifier.ipv6.sip.b[8],
+               e->flow.classifier.ipv6.sip.b[9],
+               e->flow.classifier.ipv6.sip.b[10],
+               e->flow.classifier.ipv6.sip.b[11],
+               e->flow.classifier.ipv6.sip.b[12],
+               e->flow.classifier.ipv6.sip.b[13],
+               e->flow.classifier.ipv6.sip.b[14],
+               e->flow.classifier.ipv6.sip.b[15]);
+        break;
+    }
+    printf("  %llu-%llu %llu %llu\n", e->stat.start_usec, e->stat.end_usec,
+           e->stat.packets, e->stat.octets);
+    fflush(stdout);
+
+    return 0;
+}
+
+int
+flush(flowtable_t *ft)
+{
+    flowtable_scan_cb(ft, flush_flow_cb);
+    flowtable_reset(ft);
+
     return 0;
 }
 
@@ -336,6 +379,17 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
         size_t caplen, size_t len)
 {
     struct ether_header *eth;
+    int ret;
+    uint64_t curus;
+
+    /* Flush if reaching timeout */
+    curus = ts.tv_sec * 1000000 + ts.tv_usec;
+    if ( fexprt->last_flushed + (uint64_t)fexprt->timeout * 1000000
+         < curus ) {
+        /* Flush */
+        flush(fexprt->ft);
+        fexprt->last_flushed = curus;
+    }
 
     /* Ethernet header */
     eth = (struct ether_header *)pkt;
@@ -347,20 +401,22 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     switch ( ntohs(eth->ether_type) ) {
     case 0x0800:
         /* IPv4 */
-        return analyze_ipv4(fexprt, ts, pkt + sizeof(struct ether_header),
-                            caplen - sizeof(struct ether_header),
-                            len - sizeof(struct ether_header), len);
+        ret = analyze_ipv4(fexprt, ts, pkt + sizeof(struct ether_header),
+                           caplen - sizeof(struct ether_header),
+                           len - sizeof(struct ether_header), len);
+        break;
     case 0x86dd:
         /* IPv6 */
-        return analyze_ipv6(fexprt, ts, pkt + sizeof(struct ether_header),
-                            caplen - sizeof(struct ether_header),
-                            len - sizeof(struct ether_header), len);
+        ret = analyze_ipv6(fexprt, ts, pkt + sizeof(struct ether_header),
+                           caplen - sizeof(struct ether_header),
+                           len - sizeof(struct ether_header), len);
+        break;
     default:
         /* Others; ignore */
-        ;
+        ret = 0;
     }
 
-    return 0;
+    return ret;
 }
 
 /*

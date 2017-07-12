@@ -27,6 +27,9 @@
 #include <stdio.h>
 #include <stdint.h>
 
+/*
+ * IPFIX header
+ */
 struct ipfix_header {
     uint16_t version;           /* == 10 */
     uint16_t length;            /* in bytes */
@@ -35,16 +38,25 @@ struct ipfix_header {
     uint32_t obs_dom_id;        /* Observation Domain Id */
 } __attribute__ ((packed));
 
+/*
+ * IPFIX Set header
+ */
 struct ipfix_set_header {
     uint16_t id;
     uint16_t length;
 } __attribute__ ((packed));
 
+/*
+ * IPFIX Template header
+ */
 struct ipfix_template_header {
     uint16_t template_id;
     uint16_t field_count;
 };
 
+/*
+ * IPFIX Template Field
+ */
 struct ipfix_template_field {
     uint16_t type;
     uint16_t length;

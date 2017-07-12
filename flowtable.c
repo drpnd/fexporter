@@ -66,6 +66,7 @@ flowtable_init(size_t size)
         return NULL;
     }
     ft->size = size;
+    (void)memset(ft->entries, 0, sizeof(flowtable_entry_t) * ft->size);
 
     return ft;
 }
@@ -116,7 +117,7 @@ flowtable_search(flowtable_t *ft, flow_t *f)
 }
 
 /*
- * Scan all the entries with a callback function
+ * Scan all valid entries with a callback function
  */
 int
 flowtable_scan_cb(flowtable_t *ft, flowtable_scan_f cb)
@@ -124,7 +125,9 @@ flowtable_scan_cb(flowtable_t *ft, flowtable_scan_f cb)
     ssize_t i;
 
     for ( i = 0; i < (ssize_t)ft->size; i++ ) {
-        cb(ft, &ft->entries[i]);
+        if ( ft->entries[i].valid ) {
+            cb(ft, &ft->entries[i]);
+        }
     }
 
     return 0;
