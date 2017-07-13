@@ -44,7 +44,7 @@
 #define FEXPORTER_FLOWTABLE_SIZE 2048
 
 /* Default timeout in seconds */
-#define FEXPORTER_DEFAULT_TIMEOUT 60
+#define FEXPORTER_DEFAULT_TIMEOUT 300
 
 #define FEXPORTER_SNAPLEN       96
 #define FEXPORTER_PROMISC       1
