@@ -86,8 +86,8 @@ typedef struct {
 
 /* Statistical values */
 typedef struct {
-    uint64_t start_usec;
-    uint64_t end_usec;
+    uint64_t start_msec;
+    uint64_t end_msec;
     uint64_t octets;
     uint64_t packets;
 } flow_stats_t;

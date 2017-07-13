@@ -50,6 +50,12 @@
 #define FEXPORTER_PROMISC       1
 #define FEXPORTER_TO_MS         1
 
+#define FEXPORTER_IPV4_ID       259
+#define FEXPORTER_IPV4_OBS      256
+#define FEXPORTER_IPV6_ID       260
+#define FEXPORTER_IPV6_OBS      512
+
+
 
 /*
  * Floe exporter data structure
@@ -64,6 +70,11 @@ struct fexporter {
     /* MAC address to determine the direction */
     uint8_t macaddr[6];
 
+    /* Flowseq for IPv4 */
+    uint32_t seq4;
+    /* Flowseq for IPv6 */
+    uint32_t seq6;
+
     /* Socket */
     int sock;
     struct sockaddr_storage saddr;
@@ -75,6 +86,38 @@ void usage(const char *);
 uint64_t diff_timeval(struct timeval, struct timeval);
 void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
 int flush(struct fexporter *);
+
+#if !defined(ntohll)
+static __inline__ uint64_t
+ntohll(uint64_t a)
+{
+#ifdef WORDS_BIGENDIAN
+    return a;
+#else
+    uint32_t lo = a & 0xffffffff;
+    uint32_t hi = a >> 32U;
+    lo = ntohl(lo);
+    hi = ntohl(hi);
+    return ((uint64_t) lo) << 32U | hi;
+#endif
+}
+#endif
+
+#if !defined(htonll)
+static __inline__ uint64_t
+htonll(uint64_t a)
+{
+#ifdef WORDS_BIGENDIAN
+    return a;
+#else
+    uint32_t lo = a & 0xffffffff;
+    uint32_t hi = a >> 32U;
+    lo = ntohl(lo);
+    hi = ntohl(hi);
+    return ((uint64_t) lo) << 32U | hi;
+#endif
+}
+#endif
 
 /*
  * Print out usage
@@ -99,7 +142,7 @@ diff_timeval(struct timeval ts1, struct timeval ts2)
 }
 
 /*
- * Organize flow template set
+ * Generate flow template set for IPv4 flows
  */
 ssize_t
 flow_template_set_v4(uint8_t *pkt)
@@ -113,7 +156,7 @@ flow_template_set_v4(uint8_t *pkt)
     hdr->id = htons(templateSet);
 
     tmpl = (struct ipfix_template_header *)(hdr + 1);
-    tmpl->template_id = htons(259);
+    tmpl->template_id = htons(FEXPORTER_IPV4_ID);
 
     field = (struct ipfix_template_field *)(tmpl + 1);
     n = 0;
@@ -169,12 +212,12 @@ flow_template_set_v4(uint8_t *pkt)
     n++;
 
     /* Start */
-    field[n].type = htons(flowStartMicroseconds);
+    field[n].type = htons(flowStartMilliseconds);
     field[n].length = htons(8);
     n++;
 
     /* End */
-    field[n].type = htons(flowEndMicroseconds);
+    field[n].type = htons(flowEndMilliseconds);
     field[n].length = htons(8);
     n++;
 
@@ -185,6 +228,90 @@ flow_template_set_v4(uint8_t *pkt)
     return length;
 }
 
+/*
+ * Build flow for IPv4 flows
+ */
+ssize_t
+flow_v4(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
+{
+    int n;
+
+    n = 0;
+
+    /* IPv4 source address */
+    memcpy(pkt + n, flow->classifier.ipv4.sip.b, 4);
+    n += 4;
+
+    /* IPv4 destination address */
+    memcpy(pkt + n, flow->classifier.ipv4.dip.b, 4);
+    n += 4;
+
+    /* IP protocol version */
+    *(pkt + n) = 4;
+    n++;
+
+    /* Protocol */
+    *(pkt + n) = flow->classifier.ipv4.proto;
+    n++;
+
+    if ( 1 == flow->classifier.ipv4.proto ) {
+        /* ICMP */
+        /* Source port */
+        *(uint16_t *)(pkt + n) = 0;
+        n += 2;
+
+        /* Destination port */
+        *(uint16_t *)(pkt + n) = 0;
+        n += 2;
+
+        /* ICMP type */
+        *(pkt + n) = flow->classifier.ipv4.sport;
+        n++;
+
+        /* ICMP code */
+        *(pkt + n) = flow->classifier.ipv4.dport;
+        n++;
+    } else {
+        /* TCP/UDP */
+        /* Source port */
+        *(uint16_t *)(pkt + n) = htons(flow->classifier.ipv4.sport);
+        n += 2;
+
+        /* Destination port */
+        *(uint16_t *)(pkt + n) = htons(flow->classifier.ipv4.dport);
+        n += 2;
+
+        /* ICMP type */
+        *(pkt + n) = 0;
+        n++;
+
+        /* ICMP code */
+        *(pkt + n) = 0;
+        n++;
+    }
+
+    /* Bytes */
+    *(uint64_t *)(pkt + n) = htonll(stats->octets);
+    n += 8;
+
+    /* Packets */
+    *(uint64_t *)(pkt + n) = htonll(stats->packets);
+    n += 8;
+
+    /* Start */
+    *(uint64_t *)(pkt + n) = htonll(stats->start_msec);
+    n += 8;
+
+    /* End */
+    *(uint64_t *)(pkt + n) = htonll(stats->end_msec);
+    n += 8;
+
+    return n;
+}
+
+/*
+ * Generate flow template set for IPv4 flows
+ */
 ssize_t
 flow_template_set_v6(uint8_t *pkt)
 {
@@ -197,7 +324,7 @@ flow_template_set_v6(uint8_t *pkt)
     hdr->id = htons(templateSet);
 
     tmpl = (struct ipfix_template_header *)(hdr + 1);
-    tmpl->template_id = htons(260);
+    tmpl->template_id = htons(FEXPORTER_IPV6_ID);
 
     field = (struct ipfix_template_field *)(tmpl + 1);
     n = 0;
@@ -253,12 +380,12 @@ flow_template_set_v6(uint8_t *pkt)
     n++;
 
     /* Start */
-    field[n].type = htons(flowStartMicroseconds);
+    field[n].type = htons(flowStartMilliseconds);
     field[n].length = htons(8);
     n++;
 
     /* End */
-    field[n].type = htons(flowEndMicroseconds);
+    field[n].type = htons(flowEndMilliseconds);
     field[n].length = htons(8);
     n++;
 
@@ -270,6 +397,86 @@ flow_template_set_v6(uint8_t *pkt)
     return length;
 }
 
+/*
+ * Build flow for IPv6 flows
+ */
+ssize_t
+flow_v6(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
+{
+    int n;
+
+    n = 0;
+
+    /* IPv6 source address */
+    memcpy(pkt + n, flow->classifier.ipv6.sip.b, 16);
+    n += 16;
+
+    /* IPv4 destination address */
+    memcpy(pkt + n, flow->classifier.ipv6.dip.b, 16);
+    n += 16;
+
+    /* IP protocol version */
+    *(pkt + n) = 6;
+    n++;
+
+    /* Protocol */
+    *(pkt + n) = flow->classifier.ipv6.proto;
+    n++;
+
+    if ( 58 == flow->classifier.ipv6.proto ) {
+        /* ICMPv6 */
+        /* Source port */
+        *(uint16_t *)(pkt + n) = 0;
+        n += 2;
+
+        /* Destination port */
+        *(uint16_t *)(pkt + n) = 0;
+        n += 2;
+
+        /* ICMP type */
+        *(pkt + n) = flow->classifier.ipv6.sport;
+        n++;
+
+        /* ICMP code */
+        *(pkt + n) = flow->classifier.ipv6.dport;
+        n++;
+    } else {
+        /* TCP/UDP */
+        /* Source port */
+        *(uint16_t *)(pkt + n) = htons(flow->classifier.ipv6.sport);
+        n += 2;
+
+        /* Destination port */
+        *(uint16_t *)(pkt + n) = htons(flow->classifier.ipv6.dport);
+        n += 2;
+
+        /* ICMP type */
+        *(pkt + n) = 0;
+        n++;
+
+        /* ICMP code */
+        *(pkt + n) = 0;
+        n++;
+    }
+
+    /* Bytes */
+    *(uint64_t *)(pkt + n) = htonll(stats->octets);
+    n += 8;
+
+    /* Packets */
+    *(uint64_t *)(pkt + n) = htonll(stats->packets);
+    n += 8;
+
+    /* Start */
+    *(uint64_t *)(pkt + n) = htonll(stats->start_msec);
+    n += 8;
+
+    /* End */
+    *(uint64_t *)(pkt + n) = htonll(stats->end_msec);
+    n += 8;
+
+    return n;
+}
 
 /*
  * Analyze ICMP to get ICMP type and code
@@ -293,7 +500,8 @@ analyze_icmp(const uint8_t *pkt, size_t caplen, uint16_t *type, uint16_t *code)
  * Analyze ICMPv6 to get ICMP type and code
  */
 int
-analyze_icmpv6(const uint8_t *pkt, size_t caplen, uint16_t *type, uint16_t *code)
+analyze_icmpv6(const uint8_t *pkt, size_t caplen, uint16_t *type,
+               uint16_t *code)
 {
     struct icmp6_hdr *icmp;
 
@@ -410,10 +618,10 @@ analyze_ipv4(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
             return -1;
         }
     }
-    if ( !stats->start_usec ) {
-        stats->start_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    if ( !stats->start_msec ) {
+        stats->start_msec = ts.tv_sec * 1000 + ts.tv_usec / 1000;
     }
-    stats->end_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    stats->end_msec = ts.tv_sec * 1000 + ts.tv_usec / 1000;
     stats->packets += 1;
     stats->octets += ntohs(ip->ip_len);
 
@@ -485,12 +693,110 @@ analyze_ipv6(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
             return -1;
         }
     }
-    if ( !stats->start_usec ) {
-        stats->start_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    if ( !stats->start_msec ) {
+        stats->start_msec = ts.tv_sec * 1000 + ts.tv_usec / 1000;
     }
-    stats->end_usec = ts.tv_sec * 1000000 + ts.tv_usec;
+    stats->end_msec = ts.tv_sec * 1000 + ts.tv_usec / 1000;
     stats->packets += 1;
     stats->octets += ntohs(ip->ip6_plen) + 40;
+
+    return 0;
+}
+
+/*
+ * Export IPv4 flows
+ */
+int
+export_ipv4_flows(struct fexporter *fexprt, flow_t *flow, flow_stats_t *stats,
+                  struct timeval ts)
+{
+    uint8_t pkt[1500];
+    ssize_t len;
+    int ret;
+    struct ipfix_header *ipfix;
+    struct ipfix_set_header *hdr;
+
+    /* IPv4 */
+    ipfix = (struct ipfix_header *)pkt;
+    ipfix->version = htons(10);
+    ipfix->timestamp = htonl(ts.tv_sec);
+    ipfix->flowseq = htonl(fexprt->seq4);
+    ipfix->obs_dom_id = htonl(FEXPORTER_IPV4_OBS);
+    hdr = (struct ipfix_set_header *)(ipfix + 1);
+    hdr->id = htons(FEXPORTER_IPV4_ID);
+    len = flow_v4(flow, stats, (uint8_t *)(hdr + 1));
+    if ( len < 0 ) {
+        return -1;
+    }
+    len = len + sizeof(struct ipfix_set_header);
+    hdr->length = htons(len);
+    len = len + sizeof(struct ipfix_header);
+    ipfix->length = htons(len);
+    if ( fexprt->saddr.ss_family == AF_INET ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    } else if ( fexprt->saddr.ss_family == AF_INET6 ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in6));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    }
+    fexprt->seq4++;
+
+    return 0;
+}
+
+/*
+ * Export IPv6 flows
+ */
+int
+export_ipv6_flows(struct fexporter *fexprt, flow_t *flow, flow_stats_t *stats,
+                  struct timeval ts)
+{
+    uint8_t pkt[1500];
+    ssize_t len;
+    int ret;
+    struct ipfix_header *ipfix;
+    struct ipfix_set_header *hdr;
+
+    /* IPv4 */
+    ipfix = (struct ipfix_header *)pkt;
+    ipfix->version = htons(10);
+    ipfix->timestamp = htonl(ts.tv_sec);
+    ipfix->flowseq = htonl(fexprt->seq6);
+    ipfix->obs_dom_id = htonl(FEXPORTER_IPV6_OBS);
+    hdr = (struct ipfix_set_header *)(ipfix + 1);
+    hdr->id = htons(FEXPORTER_IPV6_ID);
+    len = flow_v6(flow, stats, (uint8_t *)(hdr + 1));
+    if ( len < 0 ) {
+        return -1;
+    }
+    len = len + sizeof(struct ipfix_set_header);
+    hdr->length = htons(len);
+    len = len + sizeof(struct ipfix_header);
+    ipfix->length = htons(len);
+    if ( fexprt->saddr.ss_family == AF_INET ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    } else if ( fexprt->saddr.ss_family == AF_INET6 ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in6));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    }
+    fexprt->seq6++;
 
     return 0;
 }
@@ -502,12 +808,17 @@ int
 flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e, void *user)
 {
     struct fexporter *fexprt;
+    struct timeval ts;
 
     fexprt = (struct fexporter *)user;
+
+    gettimeofday(&ts, NULL);
 
     switch ( e->flow.etype ) {
     case 0x0800:
         /* IPv4 */
+        export_ipv4_flows(fexprt, &e->flow, &e->stat, ts);
+#if 0
         printf("%s %d.%d.%d.%d:%d->%d.%d.%d.%d:%d\n",
                e->flow.direction ? "o" : "i",
                e->flow.classifier.ipv4.sip.b[0],
@@ -520,9 +831,12 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e, void *user)
                e->flow.classifier.ipv4.dip.b[2],
                e->flow.classifier.ipv4.dip.b[3],
                e->flow.classifier.ipv4.dport);
+#endif
         break;
     case 0x86dd:
         /* IPv6 */
+        export_ipv6_flows(fexprt, &e->flow, &e->stat, ts);
+#if 0
         printf("%s %02x%02x:%02x%02x:%02x%02x:%02x%02x"
                ":%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
                e->flow.direction ? "o" : "i",
@@ -542,20 +856,95 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e, void *user)
                e->flow.classifier.ipv6.sip.b[13],
                e->flow.classifier.ipv6.sip.b[14],
                e->flow.classifier.ipv6.sip.b[15]);
+#endif
         break;
     }
-    printf("  %llu-%llu %llu %llu\n", e->stat.start_usec, e->stat.end_usec,
+#if 0
+    printf("  %llu-%llu %llu %llu\n", e->stat.start_msec, e->stat.end_msec,
            e->stat.packets, e->stat.octets);
     fflush(stdout);
-
+#endif
     return 0;
 }
 
+/*
+ * Flush flow
+ */
 int
 flush(struct fexporter *fexprt)
 {
     flowtable_scan_cb(fexprt->ft, flush_flow_cb, fexprt);
     flowtable_reset(fexprt->ft);
+
+    return 0;
+}
+
+/*
+ * Export template
+ */
+int
+export_template(struct fexporter *fexprt, struct timeval ts)
+{
+    uint8_t pkt[1500];
+    ssize_t len;
+    int ret;
+    struct ipfix_header *ipfix;
+
+    /* IPv4 */
+    ipfix = (struct ipfix_header *)pkt;
+    ipfix->version = htons(10);
+    ipfix->timestamp = htonl(ts.tv_sec);
+    ipfix->flowseq = htonl(fexprt->seq4);
+    ipfix->obs_dom_id = htonl(FEXPORTER_IPV4_OBS);
+    len = flow_template_set_v4((uint8_t *)(ipfix + 1));
+    if ( len < 0 ) {
+        return -1;
+    }
+    len = len + sizeof(struct ipfix_header);
+    ipfix->length = htons(len);
+    if ( fexprt->saddr.ss_family == AF_INET ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    } else if ( fexprt->saddr.ss_family == AF_INET6 ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in6));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    }
+
+    /* IPv6 */
+    ipfix = (struct ipfix_header *)pkt;
+    ipfix->version = htons(10);
+    ipfix->timestamp = htonl(ts.tv_sec);
+    ipfix->flowseq = htonl(fexprt->seq6);
+    ipfix->obs_dom_id = htonl(FEXPORTER_IPV6_OBS);
+    len = flow_template_set_v6((uint8_t *)(ipfix + 1));
+    if ( len < 0 ) {
+        return -1;
+    }
+    len = len + sizeof(struct ipfix_header);
+    ipfix->length = htons(len);
+    if ( fexprt->saddr.ss_family == AF_INET ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    } else if ( fexprt->saddr.ss_family == AF_INET6 ) {
+        ret = sendto(fexprt->sock, pkt, len, 0,
+                     (struct sockaddr *)&fexprt->saddr,
+                     sizeof(struct sockaddr_in6));
+        if ( ret < 0 ) {
+            return -1;
+        }
+    }
 
     return 0;
 }
@@ -576,27 +965,13 @@ analyze(struct fexporter *fexprt, struct timeval ts, const uint8_t *pkt,
     curus = ts.tv_sec * 1000000 + ts.tv_usec;
     if ( fexprt->last_flushed + (uint64_t)fexprt->timeout * 1000000
          < curus ) {
-
-        uint8_t pkt[1500];
-        struct ipfix_header *ipfix;
-        ipfix = (struct ipfix_header *)pkt;
-        ipfix->version = htons(10);
-        ipfix->timestamp = htonl(ts.tv_sec);
-        ipfix->flowseq = htonl(1);
-        ipfix->obs_dom_id = htonl(256); //512 for IPv6
-        int l = flow_template_set_v4((uint8_t *)(ipfix + 1));
-        int ll = l + sizeof(struct ipfix_header);
-        ipfix->length = htons(ll);
-
-        if ( fexprt->saddr.ss_family == AF_INET ) {
-            ret = sendto(fexprt->sock, pkt, ll, 0,
-                         (struct sockaddr *)&fexprt->saddr,
-                         sizeof(struct sockaddr_in));
-            printf("%d\n", ret);
-        }
+        /* Export template */
+        export_template(fexprt, ts);
 
         /* Flush */
         flush(fexprt);
+
+        /* Update timestamp */
         fexprt->last_flushed = curus;
     }
 

@@ -21,7 +21,7 @@
 # SOFTWARE.
 #
 
-cmake_minimum_required (VERSION 2.6)
+cmake_minimum_required (VERSION 3.0)
 
 project (fexporter)
 
@@ -42,10 +42,20 @@ else(WIN32)
 endif(WIN32)
 string(STRIP ${BUILD_DATETIME} BUILD_DATETIME)
 
+# Endian test
+include (TestBigEndian)
+TEST_BIG_ENDIAN(IS_BIG_ENDIAN)
+if(IS_BIG_ENDIAN)
+  set(WORDS_BIGENDIAN 1)
+else(IS_BIG_ENDIAN)
+  set(WORDS_BIGENDIAN 0)
+endif(IS_BIG_ENDIAN)
+
 execute_process (COMMAND git symbolic-ref --short HEAD
   OUTPUT_VARIABLE GIT_CURRENT_BRANCH)
 
-add_definitions (-DBUILD_DATETIME=\"${BUILD_DATETIME}\")
+add_definitions (-DBUILD_DATETIME=\"${BUILD_DATETIME}\"
+  -DWORDS_BIGENDIAN=${WORDS_BIGENDIAN})
 
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "build")
 
