@@ -818,52 +818,13 @@ flush_flow_cb(flowtable_t *ft, flowtable_entry_t *e, void *user)
     case 0x0800:
         /* IPv4 */
         export_ipv4_flows(fexprt, &e->flow, &e->stat, ts);
-#if 0
-        printf("%s %d.%d.%d.%d:%d->%d.%d.%d.%d:%d\n",
-               e->flow.direction ? "o" : "i",
-               e->flow.classifier.ipv4.sip.b[0],
-               e->flow.classifier.ipv4.sip.b[1],
-               e->flow.classifier.ipv4.sip.b[2],
-               e->flow.classifier.ipv4.sip.b[3],
-               e->flow.classifier.ipv4.sport,
-               e->flow.classifier.ipv4.dip.b[0],
-               e->flow.classifier.ipv4.dip.b[1],
-               e->flow.classifier.ipv4.dip.b[2],
-               e->flow.classifier.ipv4.dip.b[3],
-               e->flow.classifier.ipv4.dport);
-#endif
         break;
     case 0x86dd:
         /* IPv6 */
         export_ipv6_flows(fexprt, &e->flow, &e->stat, ts);
-#if 0
-        printf("%s %02x%02x:%02x%02x:%02x%02x:%02x%02x"
-               ":%02x%02x:%02x%02x:%02x%02x:%02x%02x\n",
-               e->flow.direction ? "o" : "i",
-               e->flow.classifier.ipv6.sip.b[0],
-               e->flow.classifier.ipv6.sip.b[1],
-               e->flow.classifier.ipv6.sip.b[2],
-               e->flow.classifier.ipv6.sip.b[3],
-               e->flow.classifier.ipv6.sip.b[4],
-               e->flow.classifier.ipv6.sip.b[5],
-               e->flow.classifier.ipv6.sip.b[6],
-               e->flow.classifier.ipv6.sip.b[7],
-               e->flow.classifier.ipv6.sip.b[8],
-               e->flow.classifier.ipv6.sip.b[9],
-               e->flow.classifier.ipv6.sip.b[10],
-               e->flow.classifier.ipv6.sip.b[11],
-               e->flow.classifier.ipv6.sip.b[12],
-               e->flow.classifier.ipv6.sip.b[13],
-               e->flow.classifier.ipv6.sip.b[14],
-               e->flow.classifier.ipv6.sip.b[15]);
-#endif
         break;
     }
-#if 0
-    printf("  %llu-%llu %llu %llu\n", e->stat.start_msec, e->stat.end_msec,
-           e->stat.packets, e->stat.octets);
-    fflush(stdout);
-#endif
+
     return 0;
 }
 
