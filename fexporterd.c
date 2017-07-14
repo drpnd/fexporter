@@ -201,6 +201,11 @@ flow_template_set_v4(uint8_t *pkt)
     field[n].length = htons(1);
     n++;
 
+    /* Flow direction */
+    field[n].type = htons(flowDirection);
+    field[n].length = htons(1);
+    n++;
+
     /* Bytes */
     field[n].type = htons(octetDeltaCount);
     field[n].length = htons(8);
@@ -290,6 +295,10 @@ flow_v4(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
         n++;
     }
 
+    /* Direction */
+    *(uint8_t *)(pkt + n) = flow->direction;
+    n++;
+
     /* Bytes */
     *(uint64_t *)(pkt + n) = htonll(stats->octets);
     n += 8;
@@ -366,6 +375,11 @@ flow_template_set_v6(uint8_t *pkt)
 
     /* ICMPv6 code */
     field[n].type = htons(icmpCodeIPv6);
+    field[n].length = htons(1);
+    n++;
+
+    /* Flow direction */
+    field[n].type = htons(flowDirection);
     field[n].length = htons(1);
     n++;
 
@@ -458,6 +472,10 @@ flow_v6(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
         *(pkt + n) = 0;
         n++;
     }
+
+    /* Direction */
+    *(uint8_t *)(pkt + n) = flow->direction;
+    n++;
 
     /* Bytes */
     *(uint64_t *)(pkt + n) = htonll(stats->octets);
