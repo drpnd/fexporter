@@ -55,7 +55,14 @@
 #define FEXPORTER_IPV6_ID       260
 #define FEXPORTER_IPV6_OBS      512
 
-
+/*
+ * Options
+ */
+struct fexporter_config {
+    char *ifname;
+    char *host;
+    uint16_t port;
+};
 
 /*
  * Floe exporter data structure
@@ -78,6 +85,9 @@ struct fexporter {
     /* Socket */
     int sock;
     struct sockaddr_storage saddr;
+
+    /* Config */
+    struct fexporter_config cfg;
 };
 
 
@@ -125,7 +135,7 @@ htonll(uint64_t a)
 void
 usage(const char *prog)
 {
-    fprintf(stderr, "%s: interface\n", prog);
+    fprintf(stderr, "%s: <interface> <agent-ipaddr>:<port>\n", prog);
 }
 
 /*
@@ -1013,6 +1023,61 @@ cb_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 }
 
 /*
+ * Parse options
+ */
+int
+parse_opts(int argc, const char *const argv[], struct fexporter_config *cfg)
+{
+    const char *opt;
+    const char *host;
+    const char *port;
+
+    if ( argc < 3 ) {
+        return -1;
+    }
+
+    /* Host and port */
+    opt = argv[1];
+
+    host = opt;
+    port = NULL;
+    while ( *opt ) {
+        if ( ':' == *opt ) {
+            port = opt + 1;
+            break;
+        }
+        opt++;
+    }
+
+    if ( NULL == port ) {
+        /* Port is not specified */
+        cfg->port = 9996;
+        cfg->host = strdup(host);
+        if ( NULL == cfg->host ) {
+            return -1;
+        }
+    } else {
+        /* Port is specified */
+        cfg->host = malloc(port - host);
+        if ( NULL == cfg ) {
+            return -1;
+        }
+        memcpy(cfg->host, host, port - host);
+        cfg->host[port - host - 1] = '\0';
+        cfg->port = atoi(port);
+    }
+
+    /* Interface */
+    cfg->ifname = strdup(argv[2]);
+    if ( NULL == cfg->ifname ) {
+        free(cfg->host);
+        return -1;
+    }
+
+    return 0;
+}
+
+/*
  * Main routine
  */
 int
@@ -1020,20 +1085,21 @@ main(int argc, const char *const argv[])
 {
     pcap_t *pd;
     char errbuf[PCAP_ERRBUF_SIZE];
-    const char *ifname;
     struct bpf_program bpfp;
     /* Definition of the loopback function */
     void cb_handler(u_char *, const struct pcap_pkthdr *, const u_char *);
     struct fexporter fexprt;
+    int ret;
 
-    if ( argc < 2 ) {
+    /* Parse the configuration */
+    ret = parse_opts(argc, argv, &fexprt.cfg);
+    if ( ret < 0 ) {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
-    ifname = argv[1];
 
     /* Open pcap */
-    pd = pcap_open_live(ifname, FEXPORTER_SNAPLEN, FEXPORTER_PROMISC,
+    pd = pcap_open_live(fexprt.cfg.ifname, FEXPORTER_SNAPLEN, FEXPORTER_PROMISC,
                         FEXPORTER_TO_MS, errbuf);
     if ( NULL == pd ) {
         /* error */
@@ -1074,7 +1140,7 @@ main(int argc, const char *const argv[])
     fexprt.timeout = FEXPORTER_DEFAULT_TIMEOUT;
 
     /* Get local MAC address */
-    if ( ifutil_macaddr(ifname, fexprt.macaddr) < 0 ) {
+    if ( ifutil_macaddr(fexprt.cfg.ifname, fexprt.macaddr) < 0 ) {
         pcap_close(pd);
         flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
@@ -1082,7 +1148,6 @@ main(int argc, const char *const argv[])
 
     /* Open UDP socket */
     struct sockaddr_in *sin;
-    int ret;
     fexprt.sock = socket(AF_INET, SOCK_DGRAM, 0);
     if ( fexprt.sock < 0 ) {
         fprintf(stderr, "Cannot open a UDP socket.");
@@ -1094,8 +1159,8 @@ main(int argc, const char *const argv[])
     memset(&fexprt.saddr, 0, sizeof(struct sockaddr_storage));
     sin = (struct sockaddr_in *)&fexprt.saddr;
     sin->sin_family = AF_INET;
-    sin->sin_port = htons(4739);
-    ret = inet_aton("127.0.0.1", &sin->sin_addr);
+    sin->sin_port = htons(fexprt.cfg.port);
+    ret = inet_aton(fexprt.cfg.host, &sin->sin_addr);
     if ( ret < 0 ) {
         close(fexprt.sock);
         pcap_freecode(&bpfp);
