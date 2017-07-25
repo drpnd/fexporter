@@ -135,7 +135,7 @@ htonll(uint64_t a)
 void
 usage(const char *prog)
 {
-    fprintf(stderr, "%s: <interface> <agent-ipaddr>:<port>\n", prog);
+    fprintf(stderr, "%s: <agent-ipaddr>:<port> <interface>\n", prog);
 }
 
 /*
