@@ -27,6 +27,8 @@
 #include <string.h>
 #include <sys/time.h>
 #include <pcap/pcap.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
