@@ -218,6 +218,15 @@ flow_template_set_v4(uint8_t *pkt)
     field[n].length = htons(1);
     n++;
 
+    /* Interfaces */
+    field[n].type = htons(ingressInterface);
+    field[n].length = htons(4);
+    n++;
+    field[n].type = htons(egressInterface);
+    field[n].length = htons(4);
+    n++;
+
+
     /* Bytes */
     field[n].type = htons(octetDeltaCount);
     field[n].length = htons(8);
@@ -311,6 +320,21 @@ flow_v4(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
     *(uint8_t *)(pkt + n) = flow->direction;
     n++;
 
+    /* Interface */
+    if ( flow->direction ) {
+        /* Egress */
+        *(uint32_t *)(pkt + n) = htonl(0);
+        n += 4;
+        *(uint32_t *)(pkt + n) = htonl(1);
+        n += 4;
+    } else {
+        /* Ingress */
+        *(uint32_t *)(pkt + n) = htonl(1);
+        n += 4;
+        *(uint32_t *)(pkt + n) = htonl(0);
+        n += 4;
+    }
+
     /* Bytes */
     *(uint64_t *)(pkt + n) = htonll(stats->octets);
     n += 8;
@@ -393,6 +417,14 @@ flow_template_set_v6(uint8_t *pkt)
     /* Flow direction */
     field[n].type = htons(flowDirection);
     field[n].length = htons(1);
+    n++;
+
+    /* Interfaces */
+    field[n].type = htons(ingressInterface);
+    field[n].length = htons(4);
+    n++;
+    field[n].type = htons(egressInterface);
+    field[n].length = htons(4);
     n++;
 
     /* Bytes */
@@ -488,6 +520,21 @@ flow_v6(flow_t *flow, flow_stats_t *stats, uint8_t *pkt)
     /* Direction */
     *(uint8_t *)(pkt + n) = flow->direction;
     n++;
+
+    /* Interface */
+    if ( flow->direction ) {
+        /* Egress */
+        *(uint32_t *)(pkt + n) = htonl(0);
+        n += 4;
+        *(uint32_t *)(pkt + n) = htonl(1);
+        n += 4;
+    } else {
+        /* Ingress */
+        *(uint32_t *)(pkt + n) = htonl(1);
+        n += 4;
+        *(uint32_t *)(pkt + n) = htonl(0);
+        n += 4;
+    }
 
     /* Bytes */
     *(uint64_t *)(pkt + n) = htonll(stats->octets);

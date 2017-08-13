@@ -1,19 +1,29 @@
-# fexporter: Flow Exporter
+[![GitHub license](https://img.shields.io/github/license/drpnd/fexporter.svg)](https://github.com/drpnd/fexporter)
+[![Jenkins](https://img.shields.io/jenkins/s/https/pix.jar.jp/jenkins/job/fexporter.svg)](https://img.shields.io/jenkins/s/https/pix.jar.jp/jenkins/job/fexporter.svg)
 
-This software implements the flow exporter using IPFIX (formerly known as NetFlow).
+# Fexporter: IPFIX Flow Exporter
+
+*Fexporter* is an IPFIX flow exporter implementation targeting for BSD, Linux,
+and macOS.
+It simply exports flows using IPFIX over UDP without packet sampling.
+This software supports both IPv4 and IPv6 flows.
 
 ## Dependencies
+
 * libpcap
+
 
 ## How to use
 
 Current version of fexporter is simple and supports minimal options.
 The following sections describe how to use this software.
 
+
 ### Compile the software
 
     $ cmake .
     $ make
+
 
 ### Run the software as root
 
