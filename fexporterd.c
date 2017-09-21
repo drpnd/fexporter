@@ -61,6 +61,7 @@
  * Options
  */
 struct fexporter_config {
+    int family;
     char *ifname;
     char *host;
     uint16_t port;
@@ -137,7 +138,7 @@ htonll(uint64_t a)
 void
 usage(const char *prog)
 {
-    fprintf(stderr, "%s: <agent-ipaddr>:<port> <interface>\n", prog);
+    fprintf(stderr, "%s: <agent-ipaddr> <port> <interface>\n", prog);
 }
 
 /*
@@ -1077,28 +1078,32 @@ cb_handler(u_char *user, const struct pcap_pkthdr *h, const u_char *bytes)
 int
 parse_opts(int argc, const char *const argv[], struct fexporter_config *cfg)
 {
-    const char *opt;
+    const char *s;
     const char *host;
     const char *port;
 
-    if ( argc < 3 ) {
+    if ( argc < 4 ) {
         return -1;
     }
 
-    /* Host and port */
-    opt = argv[1];
+    /* Host */
+    host = argv[1];
 
-    host = opt;
-    port = NULL;
-    while ( *opt ) {
-        if ( ':' == *opt ) {
-            port = opt + 1;
+    /* Family */
+    cfg->family = AF_INET;
+    s = host;
+    while ( *s ) {
+        if ( ':' == *s ) {
+            cfg->family = AF_INET6;
             break;
         }
-        opt++;
+        s++;
     }
 
-    if ( NULL == port ) {
+    /* Port */
+    port = argv[2];
+
+    if ( NULL == port || 0 == strcmp("", port) ) {
         /* Port is not specified */
         cfg->port = 9996;
         cfg->host = strdup(host);
@@ -1107,17 +1112,12 @@ parse_opts(int argc, const char *const argv[], struct fexporter_config *cfg)
         }
     } else {
         /* Port is specified */
-        cfg->host = malloc(port - host);
-        if ( NULL == cfg ) {
-            return -1;
-        }
-        memcpy(cfg->host, host, port - host);
-        cfg->host[port - host - 1] = '\0';
+        cfg->host = strdup(host);
         cfg->port = atoi(port);
     }
 
     /* Interface */
-    cfg->ifname = strdup(argv[2]);
+    cfg->ifname = strdup(argv[3]);
     if ( NULL == cfg->ifname ) {
         free(cfg->host);
         return -1;
@@ -1195,22 +1195,46 @@ main(int argc, const char *const argv[])
         return EXIT_FAILURE;
     }
 
-    /* Open UDP socket */
-    struct sockaddr_in *sin;
-    fexprt.sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if ( fexprt.sock < 0 ) {
-        fprintf(stderr, "Cannot open a UDP socket.");
+
+    memset(&fexprt.saddr, 0, sizeof(struct sockaddr_storage));
+    if ( AF_INET == fexprt.cfg.family ) {
+        /* Open UDP socket for IPv4 */
+        fexprt.sock = socket(AF_INET, SOCK_DGRAM, 0);
+        if ( fexprt.sock < 0 ) {
+            fprintf(stderr, "Cannot open a UDP socket.");
+            pcap_freecode(&bpfp);
+            pcap_close(pd);
+            flowtable_release(fexprt.ft);
+            return EXIT_FAILURE;
+        }
+        struct sockaddr_in *sin;
+        sin = (struct sockaddr_in *)&fexprt.saddr;
+        sin->sin_family = fexprt.cfg.family;
+        sin->sin_port = htons(fexprt.cfg.port);
+        ret = inet_pton(fexprt.cfg.family, fexprt.cfg.host, &sin->sin_addr);
+    } else if ( AF_INET6 == fexprt.cfg.family ) {
+        /* Open UDP socket for IPv6 */
+        fexprt.sock = socket(AF_INET6, SOCK_DGRAM, 0);
+        if ( fexprt.sock < 0 ) {
+            fprintf(stderr, "Cannot open a UDP socket.");
+            pcap_freecode(&bpfp);
+            pcap_close(pd);
+            flowtable_release(fexprt.ft);
+            return EXIT_FAILURE;
+        }
+        struct sockaddr_in6 *sin;
+        sin = (struct sockaddr_in6 *)&fexprt.saddr;
+        sin->sin6_family = fexprt.cfg.family;
+        sin->sin6_port = htons(fexprt.cfg.port);
+        ret = inet_pton(fexprt.cfg.family, fexprt.cfg.host, &sin->sin6_addr);
+    } else {
+        close(fexprt.sock);
         pcap_freecode(&bpfp);
         pcap_close(pd);
         flowtable_release(fexprt.ft);
         return EXIT_FAILURE;
     }
-    memset(&fexprt.saddr, 0, sizeof(struct sockaddr_storage));
-    sin = (struct sockaddr_in *)&fexprt.saddr;
-    sin->sin_family = AF_INET;
-    sin->sin_port = htons(fexprt.cfg.port);
-    ret = inet_aton(fexprt.cfg.host, &sin->sin_addr);
-    if ( ret < 0 ) {
+    if ( 1 != ret ) {
         close(fexprt.sock);
         pcap_freecode(&bpfp);
         pcap_close(pd);
