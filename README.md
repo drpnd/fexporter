@@ -27,9 +27,9 @@ The following sections describe how to use this software.
 
 ### Run the software as root
 
-    # ./build/fexporter <ipfix-agent-ip-address>:<port-number> <interface>
+    # ./build/fexporter <ipfix-agent-ip-address> <port-number> <interface>
 
 For example, the following command is used to sniff eth0 and export the flows
 to `127.0.0.1:4739`.
 
-    $ sudo ./build/fexporter 127.0.0.1:4739 eth0
+    $ sudo ./build/fexporter 127.0.0.1 4739 eth0
